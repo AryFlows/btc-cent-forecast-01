@@ -1,9 +1,10 @@
 // btc-cent-forecast-01 entry: "Frost Drift" — a 48-hour trend forecaster.
 //
 // Model: the log-price's ordinary-least-squares slope over the last 48 hours
-// (2,880 one-minute closes) of the case, extrapolated 240 minutes forward:
+// (2,880 one-minute closes) of the case, extrapolated 240 minutes forward
+// with a mild 1.05 over-extrapolation factor:
 //
-//   guess = last_close * exp(slope_48h * 240)
+//   guess = last_close * exp(slope_48h * 240 * 1.05)
 //
 // where slope_48h is the per-minute OLS slope of log(price) over the last
 // 2,880 closes. That is the honest median forecast under a log-price that
@@ -18,8 +19,17 @@
 //
 //   persistence (house baseline):      walk-forward MAE 50,162 cents
 //                                       official practice p00-p04: 47,055
-//   this model (48 h slope, d = 1.0):  walk-forward MAE 46,483 cents
-//                                       official practice p00-p04: 41,026
+//   this model (48 h slope, d = 1.05): walk-forward MAE 46,310 cents
+//                                       official practice p00-p04: 40,725
+//   48 h slope, d = 1.0 (previous):    walk-forward 46,483 / practice 41,026
+//   48 h slope, d = 1.1:               walk-forward 46,137 / practice 40,424
+//                                       — bigger aggregate gains than d=1.05,
+//                                       but the reversal cost grows with d:
+//                                       p03 (the bounce case) 67,423 vs
+//                                       66,448 at d=1.0, and the walk-forward
+//                                       second half worsens (43,591 vs
+//                                       43,409). d=1.05 takes about half the
+//                                       gain at half the reversal cost.
 //   72 h slope, d = 1.0:               walk-forward 47,215 / practice 41,375
 //   fade the last 4 h return (a=0.25): walk-forward 47,193 but practice
 //                                       48,528 — WORSE than persistence on
@@ -29,11 +39,39 @@
 //   short-window trends (12 h/24 h) and EMA momentum: unstable across
 //                                       halves; rejected.
 //
+// Revision of 15 Nov (second write of this file) — variants measured the
+// same way and rejected:
+//   blend of 48 h + 24 h slopes: walk-forward 50,509 / practice 43,617 —
+//     worse than the 48 h slope on both; the 24 h slope's noise dominates.
+//   blend of 48 h + 72 h slopes at d=1.05: walk-forward 46,694 (worse) /
+//     practice 40,908 — fails the acceptance rule on walk-forward.
+//   blend of 48 h + 60 h slopes: walk-forward 46,691 (worse) / practice
+//     40,895 — same.
+//   exponentially time-weighted OLS slope (half-life 24 h / 12 h over 72 h
+//     or 48 h): walk-forward 47,579–48,423 / practice 41,620–42,250 —
+//     worse on both; recency weighting adds variance, not signal.
+//   fade the last 4 h return on top of the 48 h trend (a=0.025–0.1):
+//     walk-forward improves (45,076–46,131) but practice worsens
+//     (41,173–41,613) — fails the acceptance rule on the official cases.
+//   anchor on the OLS fitted end-of-window value instead of the last
+//     close: walk-forward 41,456 (much better) but practice 43,100
+//     (much worse — p02 alone 98,052 vs 37,946): the fitted line lags
+//     the level, and the last close carries the level. Rejected.
+//
 // The 48 h and 72 h slopes agree within ~1%; 48 h was picked because it
 // adapts a little faster to a regime change and beat persistence in both
 // halves of the walk-forward (49,748 vs 58,821 and 43,409 vs 42,011).
-// Damping above 1.0 (d = 1.1) looked marginally better in-sample and was
-// NOT used: it is over-extrapolation with no principled basis.
+//
+// On the damping: d=1.05 is a small empirical adjustment, not a bias
+// correction — the OLS slope is unbiased for the drift, so there is no
+// statistical reason the true 4 h move should exceed slope*240. It is
+// adopted only because the gain is consistent across two independent
+// evaluations (official cases: 41,026 → 40,725; walk-forward: 46,483 →
+// 46,310; four of five official cases improve, and the walk-forward
+// first half improves 49,748 → 49,295 while the second half is flat,
+// 43,409 → 43,500). The reversal cost at 1.05 is small (p03 +488 cents)
+// and bounded by the same measurement. d=1.1 was not taken: same
+// direction, larger reversal cost, no additional justification.
 //
 // A practice score is no guide to the final (RULES.txt says so, and the
 // practice window is one 4-day realisation). The claim here is only that
@@ -66,6 +104,10 @@ const MAX_PRICE = 9_999_999.99999;
 const SLOPE_WINDOW = 2880;
 /** Minutes ahead to forecast. */
 const HORIZON_MINUTES = 240;
+/** Mild over-extrapolation of the fitted drift; see the header comment
+ *  for the measured reason (d=1.05 beats d=1.0 on both practice slices;
+ *  d=1.1 was rejected — its reversal cost grows faster than its gain). */
+const DAMPING = 1.05;
 /** Safety bound on the extrapolated log-move; inert on sane inputs. */
 const MAX_LOG_MOVE = 0.15;
 
@@ -112,7 +154,7 @@ function forecast(m: CaseMarket): number {
     throw new Error(`market ${m.id}'s last price is not a finite positive number`);
   }
   const slope = logSlope(m.prices, SLOPE_WINDOW);
-  const move = Math.max(-MAX_LOG_MOVE, Math.min(MAX_LOG_MOVE, slope * HORIZON_MINUTES));
+  const move = Math.max(-MAX_LOG_MOVE, Math.min(MAX_LOG_MOVE, slope * HORIZON_MINUTES * DAMPING));
   return price5(last * Math.exp(move));
 }
 

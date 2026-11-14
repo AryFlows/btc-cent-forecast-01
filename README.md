@@ -4,10 +4,11 @@ Forecast Bitcoin's (cbBTC/USDC, Orca) price 4 hours ahead from 72 hours of
 one-minute closes.
 
 **Model:** the OLS slope of log-price over the last 48 hours (2,880 closes),
-extrapolated 240 minutes: `guess = last_close * exp(slope * 240)`. No mean
-reversion, no short-window momentum, no fitted intercept — the drift is
-re-estimated from each case. See the header comment in `main.ts` for the
-full rationale and the rejected alternatives.
+extrapolated 240 minutes with a mild 1.05 over-extrapolation factor:
+`guess = last_close * exp(slope * 240 * 1.05)`. No mean reversion, no
+short-window momentum, no fitted intercept — the drift is re-estimated from
+each case. See the header comment in `main.ts` for the full rationale and
+the rejected alternatives.
 
 **Local practice results** (kit's six practice cases; p05's target is not in
 the kit, so p00–p04 are scored against exact actuals, and the walk-forward
@@ -16,10 +17,11 @@ uses 33 half-hourly checkpoints over the stitched practice timeline):
 | model | walk-forward MAE | practice p00–p04 MAE |
 |---|---|---|
 | persistence (house baseline) | 50,162 cents | 47,055 cents |
-| **Frost Drift (this entry)** | **46,483 cents** | **41,026 cents** |
+| **Frost Drift (this entry, d=1.05)** | **46,310 cents** | **40,725 cents** |
+| previous version (d=1.0) | 46,483 cents | 41,026 cents |
 
-Per-case practice errors (cents): p00 20,262 / p01 66,532 / p02 37,946 /
-p03 66,448 / p04 13,943. Baseline on the same five: 31,711 / 76,697 /
+Per-case practice errors (cents): p00 19,690 / p01 66,024 / p02 37,492 /
+p03 66,935 / p04 13,483. Baseline on the same five: 31,711 / 76,697 /
 47,033 / 56,685 / 23,147. The reported 6-case baseline is 44,522 cents.
 
 A practice score is no guide to the final. The claim is only that the model
